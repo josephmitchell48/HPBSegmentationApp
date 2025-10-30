@@ -1,0 +1,15 @@
+[Unit]
+Description=HPB Segmentation API
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/hpb-seg
+EnvironmentFile=/opt/hpb-seg/.env
+ExecStart=/opt/hpb-venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

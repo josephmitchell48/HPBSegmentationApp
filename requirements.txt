@@ -1,0 +1,11 @@
+fastapi==0.115.6
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+python-multipart==0.0.9
+python-dotenv==1.0.1
+boto3==1.35.32
+numpy==1.26.4
+SimpleITK==2.3.1
+# Runtime segmentation frameworks (install in AMI or custom image)
+TotalSegmentator==2.2.0
+nnunet==1.7.0
