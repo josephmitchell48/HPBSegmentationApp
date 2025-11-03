@@ -132,7 +132,12 @@ def package_outputs(source_dir: Path, *, base_name: str) -> Path:
   archive_path = temp_dir / f"{base_name}_results.zip"
   if archive_path.exists():
     archive_path.unlink()
-  shutil.make_archive(archive_path.with_suffix(""), "zip", source_dir)
+  shutil.make_archive(
+    archive_path.with_suffix(""),
+    "zip",
+    root_dir=str(source_dir.parent),
+    base_dir=str(source_dir.name),
+  )
   return archive_path
 
 
@@ -205,6 +210,49 @@ def _write_vtp(vertices: np.ndarray, faces: np.ndarray, destination: Path) -> Pa
     fh.write("  </PolyData>\n")
     fh.write("</VTKFile>\n")
 
+  return destination
+
+
+def write_volume_vti(nifti_path: Path, destination: Path, logger: Optional[Callable[[str], None]] = None) -> Path:
+  image = sitk.ReadImage(str(nifti_path))
+  array = sitk.GetArrayFromImage(image).astype(np.float32)  # z, y, x
+  dims = image.GetSize()
+  if len(dims) != 3:
+    raise ValueError(f"Expected 3D volume, got size {dims}")
+  spacing = image.GetSpacing()
+  origin = image.GetOrigin()
+  direction = image.GetDirection()
+  if len(direction) != 9:
+    direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  extent = f"0 {dims[0]-1} 0 {dims[1]-1} 0 {dims[2]-1}"
+  spacing_str = " ".join(f"{s:.6f}" for s in spacing)
+  origin_str = " ".join(f"{o:.6f}" for o in origin)
+  direction_str = " ".join(f"{d:.6f}" for d in direction)
+
+  values = array.flatten(order="C")
+
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  with destination.open("w") as fh:
+    fh.write('<?xml version="1.0"?>\n')
+    fh.write('<VTKFile type="ImageData" version="0.1" byte_order="LittleEndian">\n')
+    fh.write(
+      f'  <ImageData WholeExtent="{extent}" Origin="{origin_str}" '
+      f'Spacing="{spacing_str}" Direction="{direction_str}">\n'
+    )
+    fh.write(f'    <Piece Extent="{extent}">\n')
+    fh.write('      <PointData Scalars="intensity">\n')
+    fh.write('        <DataArray type="Float32" Name="intensity" format="ascii">\n')
+    fh.write("          " + " ".join(f"{v:.5f}" for v in values) + "\n")
+    fh.write("        </DataArray>\n")
+    fh.write("      </PointData>\n")
+    fh.write("      <CellData/>\n")
+    fh.write("    </Piece>\n")
+    fh.write("  </ImageData>\n")
+    fh.write("</VTKFile>\n")
+
+  if logger:
+    logger(f"wrote volume VTI {destination}")
   return destination
 
 

@@ -200,17 +200,32 @@ def totalseg_multilabel(
   )
 
 
-def prepare_package(case_root: Path, *, meshes: dict[str, Path], metadata: dict) -> Path:
-  pkg_dir = case_root / "package"
-  pkg_dir.mkdir(parents=True, exist_ok=True)
+def prepare_package(
+  case_root: Path,
+  *,
+  case_id: str,
+  meshes: dict[str, Path],
+  volume_vti: Path,
+  metadata: dict,
+) -> Path:
+  package_root = case_root / "package"
+  case_dir = package_root / case_id
+  seg_dir = case_dir / "segmentations"
+  seg_dir.mkdir(parents=True, exist_ok=True)
 
-  case_id = metadata.get("case_id", "case")
-
-  for label_name, mesh_path in meshes.items():
-    target = pkg_dir / f"{case_id}_{label_name}.vtp"
+  mesh_manifest: dict[str, str] = {}
+  for label_name, mesh_path in sorted(meshes.items()):
+    target = seg_dir / f"{case_id}_{label_name}.vtp"
     shutil.copy2(mesh_path, target)
+    mesh_manifest[label_name] = f"segmentations/{target.name}"
 
-  meta_path = pkg_dir / "meta.json"
-  meta_path.write_text(json.dumps(metadata, indent=2))
+  volume_target = seg_dir / f"{case_id}_volume.vti"
+  shutil.copy2(volume_vti, volume_target)
+  metadata = dict(metadata)
+  metadata["meshes"] = mesh_manifest
+  metadata["volume"] = f"segmentations/{volume_target.name}"
 
-  return pkg_dir
+  manifest_path = case_dir / "manifest.json"
+  manifest_path.write_text(json.dumps(metadata, indent=2))
+
+  return case_dir

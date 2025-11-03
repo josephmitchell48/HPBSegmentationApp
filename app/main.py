@@ -22,6 +22,7 @@ from .utils import (
   stage_artifact,
   temp_case_dirs,
   unique_case_id,
+  write_volume_vti,
   write_metadata,
 )
 
@@ -176,6 +177,12 @@ async def segment_task008(ct: UploadFile = File(...), folds: str = "0"):
       detail={"error": "Task008 produced no meshes", "case_id": case_id, "request_id": request_id},
     )
 
+  volume_vti = write_volume_vti(
+    in_path,
+    case_root / "meshes" / "volume" / f"{case_id}_volume.vti",
+    logger=case_logger,
+  )
+
   metadata = {
     "case_id": case_id,
     "request_id": request_id,
@@ -185,7 +192,13 @@ async def segment_task008(ct: UploadFile = File(...), folds: str = "0"):
     "task008_seconds": round(timer.duration, 2),
   }
 
-  pkg_dir = prepare_package(case_root, meshes=meshes, metadata=metadata)
+  pkg_dir = prepare_package(
+    case_root,
+    case_id=case_id,
+    meshes=meshes,
+    volume_vti=volume_vti,
+    metadata=metadata,
+  )
   archive_path = package_outputs(pkg_dir, base_name=case_id)
   stable_path = stage_artifact(archive_path, SEND_ROOT, f"{case_id}_task008.zip")
   case_logger(f"packaged task008 meshes -> {stable_path}")
@@ -257,7 +270,18 @@ async def segment_liver(ct: UploadFile = File(...), fast: bool = False):
     "meshes": sorted(meshes.keys()),
     "liver_seconds": round(timer.duration, 2),
   }
-  pkg_dir = prepare_package(case_root, meshes=meshes, metadata=metadata)
+  volume_vti = write_volume_vti(
+    in_path,
+    case_root / "meshes" / "volume" / f"{case_id}_volume.vti",
+    logger=case_logger,
+  )
+  pkg_dir = prepare_package(
+    case_root,
+    case_id=case_id,
+    meshes=meshes,
+    volume_vti=volume_vti,
+    metadata=metadata,
+  )
   archive_path = package_outputs(pkg_dir, base_name=case_id)
   stable_path = stage_artifact(archive_path, SEND_ROOT, f"{case_id}_liver.zip")
   case_logger(f"packaged liver meshes -> {stable_path}")
@@ -329,7 +353,18 @@ async def segment_totalseg(ct: UploadFile = File(...), fast: bool = False):
     "meshes": sorted(meshes.keys()),
     "totalseg_seconds": round(timer.duration, 2),
   }
-  pkg_dir = prepare_package(case_root, meshes=meshes, metadata=metadata)
+  volume_vti = write_volume_vti(
+    in_path,
+    case_root / "meshes" / "volume" / f"{case_id}_volume.vti",
+    logger=case_logger,
+  )
+  pkg_dir = prepare_package(
+    case_root,
+    case_id=case_id,
+    meshes=meshes,
+    volume_vti=volume_vti,
+    metadata=metadata,
+  )
   archive_path = package_outputs(pkg_dir, base_name=case_id)
   stable_path = stage_artifact(archive_path, SEND_ROOT, f"{case_id}_totalseg.zip")
   case_logger(f"packaged totalseg meshes -> {stable_path}")
@@ -437,7 +472,19 @@ async def segment_both(
     )
   metadata["meshes"] = sorted(meshes.keys())
 
-  pkg_dir = prepare_package(case_root, meshes=meshes, metadata=metadata)
+  volume_vti = write_volume_vti(
+    ct_v1,
+    case_root / "meshes" / "volume" / f"{case_id}_volume.vti",
+    logger=case_logger,
+  )
+
+  pkg_dir = prepare_package(
+    case_root,
+    case_id=case_id,
+    meshes=meshes,
+    volume_vti=volume_vti,
+    metadata=metadata,
+  )
   archive_path = package_outputs(pkg_dir, base_name=case_id)
   stable_archive = stage_artifact(archive_path, SEND_ROOT, f"{case_id}_results.zip")
   case_logger(f"copied archive to {stable_archive} size={stable_archive.stat().st_size}")
@@ -584,7 +631,19 @@ async def segment_batch(
         )
       metadata["meshes"] = sorted(meshes.keys())
 
-      pkg_dir = prepare_package(out_dir, meshes=meshes, metadata=metadata)
+      volume_vti = write_volume_vti(
+        ct_v1,
+        out_dir / "meshes" / "volume" / f"{case_id}_volume.vti",
+        logger=case_logger,
+      )
+
+      pkg_dir = prepare_package(
+        out_dir,
+        case_id=case_id,
+        meshes=meshes,
+        volume_vti=volume_vti,
+        metadata=metadata,
+      )
       dest_dir = batch_root / case_id
       if dest_dir.exists():
         shutil.rmtree(dest_dir)
