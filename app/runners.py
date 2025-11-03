@@ -1,9 +1,65 @@
+import glob
 import json
 import os
 import shutil
 from pathlib import Path
 
 from .utils import run
+
+
+def _first_existing(*paths: Path | str | None) -> Path | None:
+  for candidate in paths:
+    if not candidate:
+      continue
+    path = Path(candidate)
+    if path.exists():
+      return path
+  return None
+
+
+def find_ts_liver(out_dir: Path) -> Path:
+  candidates = [
+    out_dir / "liver.nii.gz",
+    out_dir / "segmentations" / "liver.nii.gz",
+  ]
+  match = _first_existing(*candidates)
+  if match:
+    return match
+
+  hits = glob.glob(str(out_dir / "**" / "liver.nii*"), recursive=True)
+  if hits:
+    return Path(hits[0])
+
+  raise FileNotFoundError("TotalSegmentator liver output not found")
+
+
+def find_ts_multilabel(out_dir: Path) -> Path:
+  candidates = [
+    out_dir / "segmentation.nii.gz",
+    out_dir / "segmentations.nii.gz",
+    out_dir / "segmentations" / "segmentation.nii.gz",
+  ]
+  match = _first_existing(*candidates)
+  if match:
+    return match
+
+  hits = glob.glob(str(out_dir / "**" / "segmentation*.nii*"), recursive=True)
+  if hits:
+    return Path(hits[0])
+
+  raise FileNotFoundError("TotalSegmentator multi-label output not found")
+
+
+def find_nnunet_out(out_dir: Path, case_id: str) -> Path:
+  match = _first_existing(out_dir / f"{case_id}.nii.gz")
+  if match:
+    return match
+
+  hits = sorted(glob.glob(str(out_dir / "*.nii*")))
+  if hits:
+    return Path(hits[0])
+
+  raise FileNotFoundError(f"nnU-Net output not found in {out_dir}")
 
 
 def nnunet_v1_task008(in_dir: Path, out_dir: Path, *, case_id: str, folds: str = "0") -> Path:
@@ -22,15 +78,11 @@ def nnunet_v1_task008(in_dir: Path, out_dir: Path, *, case_id: str, folds: str =
   )
   run(cmd, env=env)
 
-  expected = out_dir / f"{case_id}.nii.gz"
-  if expected.exists():
-    return expected
-
-  for candidate in out_dir.glob("*.nii.gz"):
-    if candidate.name not in {"plans.pkl", "postprocessing.json"}:
-      return candidate
-
-  raise RuntimeError(f"Task008: expected output not found for {case_id}")
+  try:
+    return find_nnunet_out(out_dir, case_id)
+  except FileNotFoundError as exc:
+    hits = sorted(Path(p).name for p in glob.glob(str(out_dir / "*.nii*")))
+    raise RuntimeError(f"Task008: expected output not found for {case_id}; saw {hits}") from exc
 
 
 def totalseg_liver_only(in_path: Path, out_dir: Path, *, fast: bool = False) -> Path:
@@ -44,23 +96,22 @@ def totalseg_liver_only(in_path: Path, out_dir: Path, *, fast: bool = False) -> 
     f"{flag_str}"
   ).strip()
   run(cmd)
-  out_path = out_dir / "liver.nii.gz"
-  if out_path.exists():
-    return out_path
-
-  found = [p.name for p in out_dir.glob("*.nii.gz")]
-  raise RuntimeError(f"TotalSegmentator liver: expected liver.nii.gz, found {found}")
+  try:
+    return find_ts_liver(out_dir)
+  except FileNotFoundError as exc:
+    hits = sorted(Path(p).relative_to(out_dir).as_posix() for p in glob.glob(str(out_dir / "**" / "*.nii*"), recursive=True))
+    raise RuntimeError(f"TotalSegmentator liver: output not found; saw {hits}") from exc
 
 
 def totalseg_multilabel(in_path: Path, out_dir: Path, *, fast: bool = False) -> Path:
   flags = "--ml --fast" if fast else "--ml"
   cmd = f"TotalSegmentator -i {in_path} -o {out_dir} {flags}"
   run(cmd)
-  for name in ("segmentation.nii.gz", "segmentations.nii.gz"):
-    candidate = out_dir / name
-    if candidate.exists():
-      return candidate
-  raise RuntimeError("TotalSegmentator multi-label output missing")
+  try:
+    return find_ts_multilabel(out_dir)
+  except FileNotFoundError as exc:
+    hits = sorted(Path(p).relative_to(out_dir).as_posix() for p in glob.glob(str(out_dir / "**" / "*.nii*"), recursive=True))
+    raise RuntimeError(f"TotalSegmentator multi-label output missing; saw {hits}") from exc
 
 
 def prepare_package(case_root: Path, *, liver_mask: Path, task008_mask: Path, metadata: dict) -> Path:
