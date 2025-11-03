@@ -113,7 +113,7 @@ async def segment_both(
   ct: UploadFile = File(...),
   folds: str = "0",
   fast: bool = True,
-  background_tasks: BackgroundTasks | None = None,
+  background_tasks: BackgroundTasks,
 ):
   case_id = unique_case_id()
   with temp_case_dirs(case_id) as dirs:
@@ -153,8 +153,7 @@ async def segment_both(
     pkg_dir = prepare_package(case_root, liver_mask=liver_path, task008_mask=task008_path, metadata=metadata)
     archive_path = package_outputs(pkg_dir, base_name=case_id)
 
-    if background_tasks:
-      background_tasks.add_task(shutil.rmtree, pkg_dir.parent, ignore_errors=True)
+    background_tasks.add_task(shutil.rmtree, pkg_dir.parent, ignore_errors=True)
 
     return FileResponse(archive_path, media_type="application/zip", filename=f"{case_id}_results.zip")
 
