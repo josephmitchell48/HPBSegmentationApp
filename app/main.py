@@ -110,10 +110,10 @@ async def segment_totalseg(ct: UploadFile = File(...), fast: bool = False):
 
 @app.post("/segment/both")
 async def segment_both(
+  background_tasks: BackgroundTasks,
   ct: UploadFile = File(...),
   folds: str = "0",
   fast: bool = True,
-  background_tasks: BackgroundTasks,
 ):
   case_id = unique_case_id()
   with temp_case_dirs(case_id) as dirs:
