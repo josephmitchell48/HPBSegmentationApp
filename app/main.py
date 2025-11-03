@@ -297,8 +297,10 @@ async def segment_both(
 
   liver_dir = out_dir / "totalseg"
   task_dir = out_dir / "task008"
+  nn_input_dir = case_root / "nnunet_in"
   liver_dir.mkdir(parents=True, exist_ok=True)
   task_dir.mkdir(parents=True, exist_ok=True)
+  nn_input_dir.mkdir(parents=True, exist_ok=True)
 
   try:
     async with SEGMENT_SEMAPHORE:
@@ -314,8 +316,11 @@ async def segment_both(
       case_logger(f"liver mask duration={timer_liver.duration:.2f}s output={liver_path}")
 
       with Timer() as timer_task008:
+        nn_input = nn_input_dir / f"{case_id}_0000.nii.gz"
+        shutil.copy2(ct_v1, nn_input)
+        case_logger(f"prepared nnunet input {nn_input}")
         task008_path = nnunet_v1_task008(
-          in_dir,
+          nn_input_dir,
           task_dir,
           case_id=case_id,
           folds=folds,
@@ -412,8 +417,10 @@ async def segment_batch(
 
       liver_dir = out_dir / "totalseg"
       task_dir = out_dir / "task008"
+      nn_input_dir = out_dir / "nnunet_in"
       liver_dir.mkdir(parents=True, exist_ok=True)
       task_dir.mkdir(parents=True, exist_ok=True)
+      nn_input_dir.mkdir(parents=True, exist_ok=True)
 
       try:
         async with SEGMENT_SEMAPHORE:
@@ -426,8 +433,11 @@ async def segment_batch(
               timeout=MODEL_TIMEOUT_SECONDS,
             )
           with Timer() as timer_task008:
+            nn_input = nn_input_dir / f"{case_id}_0000.nii.gz"
+            shutil.copy2(ct_v1, nn_input)
+            case_logger(f"prepared nnunet input {nn_input}")
             task008_path = nnunet_v1_task008(
-              in_dir,
+              nn_input_dir,
               task_dir,
               case_id=case_id,
               folds=folds,
