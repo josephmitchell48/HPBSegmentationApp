@@ -9,14 +9,20 @@ import time
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, Optional
+from typing import Callable, Dict, Iterable, Iterator, Optional
 
 from fastapi import UploadFile
 
 from .config import get_settings
 
 
-def run(cmd: str, *, env: Optional[Dict[str, str]] = None, cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+def run(
+  cmd: str,
+  *,
+  env: Optional[Dict[str, str]] = None,
+  cwd: Optional[Path] = None,
+  timeout: Optional[int] = None,
+) -> subprocess.CompletedProcess:
   settings = get_settings()
   print(f"[cmd] {cmd}", flush=True)
   full_env = os.environ.copy()
@@ -25,13 +31,19 @@ def run(cmd: str, *, env: Optional[Dict[str, str]] = None, cwd: Optional[Path] =
   if env:
     full_env.update(env)
 
-  processed = subprocess.run(
-    shlex.split(cmd),
-    capture_output=True,
-    text=True,
-    cwd=str(cwd) if cwd else None,
-    env=full_env,
-  )
+  try:
+    processed = subprocess.run(
+      shlex.split(cmd),
+      capture_output=True,
+      text=True,
+      cwd=str(cwd) if cwd else None,
+      env=full_env,
+      timeout=timeout,
+    )
+  except subprocess.TimeoutExpired as exc:
+    print(f"[timeout] {cmd} exceeded {timeout}s", flush=True)
+    raise
+
   if processed.returncode != 0:
     print("---- STDOUT ----\n" + processed.stdout, flush=True)
     print("---- STDERR ----\n" + processed.stderr, flush=True)
@@ -68,6 +80,42 @@ def temp_case_dirs(case_id: str, *, cleanup: bool = True) -> Iterator[Dict[str, 
     if cleanup and not settings.keep_intermediate:
       shutil.rmtree(in_dir, ignore_errors=True)
       shutil.rmtree(out_dir, ignore_errors=True)
+
+
+def make_case_logger(case_root: Path) -> Callable[[str], None]:
+  log_path = case_root / "case.log"
+
+  def _log(message: str) -> None:
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a") as fh:
+      fh.write(f"{timestamp} {message}\n")
+
+  return _log
+
+
+def list_tree(path: Path, max_files: int = 100) -> list[str]:
+  if not path.exists():
+    return []
+  entries: list[str] = []
+  for candidate in path.rglob("*"):
+    if candidate.is_file():
+      entries.append(candidate.relative_to(path).as_posix())
+      if len(entries) >= max_files:
+        break
+  return sorted(entries)
+
+
+def stage_artifact(src: Path, dest_dir: Path, filename: str) -> Path:
+  dest_dir.mkdir(parents=True, exist_ok=True)
+  dest_path = dest_dir / filename
+  tmp_path = dest_dir / f".{filename}.part"
+  with src.open("rb") as infile, tmp_path.open("wb") as outfile:
+    shutil.copyfileobj(infile, outfile)
+    outfile.flush()
+    os.fsync(outfile.fileno())
+  tmp_path.replace(dest_path)
+  return dest_path
 
 
 def read_upload(file: UploadFile, target: Path) -> None:

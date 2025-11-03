@@ -2,11 +2,12 @@ import glob
 import json
 import os
 import shutil
+import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .utils import run
+from .utils import list_tree, run
 
 
 def _first_existing(*paths: Path | str | None) -> Path | None:
@@ -79,12 +80,26 @@ def run_with_verified_output(
   env: dict[str, str] | None = None,
   expected_hint: str | None = None,
   finder: Callable[[Path], Path] | None = None,
+  logger: Callable[[str], None] | None = None,
+  timeout: int | None = None,
 ) -> Path:
   out_dir.mkdir(parents=True, exist_ok=True)
+  if logger:
+    logger(f"[cmd] {cmd}")
   start = time.time()
-  run(cmd, env=env)
+  try:
+    run(cmd, env=env, timeout=timeout)
+  except subprocess.TimeoutExpired as exc:  # type: ignore[name-defined]
+    timeout_msg = f"[timeout] {cmd} exceeded {timeout}s"
+    print(timeout_msg, flush=True)
+    if logger:
+      logger(timeout_msg)
+    raise RuntimeError(timeout_msg) from exc
   duration = time.time() - start
-  print(f"[done] {cmd} ({duration:.1f}s)", flush=True)
+  done_msg = f"[done] {cmd} ({duration:.1f}s)"
+  print(done_msg, flush=True)
+  if logger:
+    logger(done_msg)
   # give filesystem a moment to flush outputs on network mounts
   time.sleep(0.25)
   try:
@@ -92,19 +107,28 @@ def run_with_verified_output(
       path = finder(out_dir)
     else:
       path = find_output(out_dir)
-    print(f"[found] {path}", flush=True)
+    found_msg = f"[found] {path}"
+    print(found_msg, flush=True)
+    if logger:
+      logger(found_msg)
     return path
   except FileNotFoundError as exc:
-    hits = [
-      Path(p).relative_to(out_dir).as_posix()
-      for p in glob.glob(str(out_dir / "**" / "*"), recursive=True)
-    ]
-    raise RuntimeError(
-      f"Expected output not found (hint={expected_hint}); saw {hits}"
-    ) from exc
+    hits = list_tree(out_dir)
+    error_msg = f"Expected output not found (hint={expected_hint}); saw {hits}"
+    if logger:
+      logger(f"[error] {error_msg}")
+    raise RuntimeError(error_msg) from exc
 
 
-def nnunet_v1_task008(in_dir: Path, out_dir: Path, *, case_id: str, folds: str = "0") -> Path:
+def nnunet_v1_task008(
+  in_dir: Path,
+  out_dir: Path,
+  *,
+  case_id: str,
+  folds: str = "0",
+  logger: Callable[[str], None] | None = None,
+  timeout: int | None = None,
+) -> Path:
   env = os.environ.copy()
   env.setdefault("RESULTS_FOLDER", "/models/nnunet_v1")
   cmd = (
@@ -124,10 +148,19 @@ def nnunet_v1_task008(in_dir: Path, out_dir: Path, *, case_id: str, folds: str =
     env=env,
     expected_hint=case_id,
     finder=lambda path: find_nnunet_out(path, case_id),
+    logger=logger,
+    timeout=timeout,
   )
 
 
-def totalseg_liver_only(in_path: Path, out_dir: Path, *, fast: bool = False) -> Path:
+def totalseg_liver_only(
+  in_path: Path,
+  out_dir: Path,
+  *,
+  fast: bool = False,
+  logger: Callable[[str], None] | None = None,
+  timeout: int | None = None,
+) -> Path:
   flags = ["--fast"] if fast else []
   flag_str = " ".join(flags)
   cmd = (
@@ -142,10 +175,19 @@ def totalseg_liver_only(in_path: Path, out_dir: Path, *, fast: bool = False) -> 
     out_dir,
     expected_hint="liver.nii.gz",
     finder=find_ts_liver,
+    logger=logger,
+    timeout=timeout,
   )
 
 
-def totalseg_multilabel(in_path: Path, out_dir: Path, *, fast: bool = False) -> Path:
+def totalseg_multilabel(
+  in_path: Path,
+  out_dir: Path,
+  *,
+  fast: bool = False,
+  logger: Callable[[str], None] | None = None,
+  timeout: int | None = None,
+) -> Path:
   flags = "--ml --fast" if fast else "--ml"
   cmd = f"TotalSegmentator -i {in_path} -o {out_dir} {flags}"
   return run_with_verified_output(
@@ -153,6 +195,8 @@ def totalseg_multilabel(in_path: Path, out_dir: Path, *, fast: bool = False) -> 
     out_dir,
     expected_hint="segmentation.nii.gz",
     finder=find_ts_multilabel,
+    logger=logger,
+    timeout=timeout,
   )
 
 
