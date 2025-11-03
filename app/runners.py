@@ -200,14 +200,15 @@ def totalseg_multilabel(
   )
 
 
-def prepare_package(case_root: Path, *, liver_mask: Path, task008_mask: Path, metadata: dict) -> Path:
+def prepare_package(case_root: Path, *, meshes: dict[str, Path], metadata: dict) -> Path:
   pkg_dir = case_root / "package"
   pkg_dir.mkdir(parents=True, exist_ok=True)
 
-  target_liver = pkg_dir / "liver.nii.gz"
-  target_task8 = pkg_dir / "task008.nii.gz"
-  shutil.copy2(liver_mask, target_liver)
-  shutil.copy2(task008_mask, target_task8)
+  case_id = metadata.get("case_id", "case")
+
+  for label_name, mesh_path in meshes.items():
+    target = pkg_dir / f"{case_id}_{label_name}.vtp"
+    shutil.copy2(mesh_path, target)
 
   meta_path = pkg_dir / "meta.json"
   meta_path.write_text(json.dumps(metadata, indent=2))

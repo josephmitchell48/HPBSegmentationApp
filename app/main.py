@@ -15,6 +15,7 @@ from .runners import nnunet_v1_task008, prepare_package, totalseg_liver_only, to
 from .utils import (
   Timer,
   extract_archive,
+  generate_meshes,
   make_case_logger,
   log_execution,
   package_outputs,
@@ -162,11 +163,35 @@ async def segment_task008(ct: UploadFile = File(...), folds: str = "0"):
       detail={"error": f"Task008 failed: {exc}", "case_id": case_id, "request_id": request_id},
     ) from exc
 
-  stable_path = stage_artifact(output_path, SEND_ROOT, f"{case_id}_task008.nii.gz")
-  case_logger(f"copied output to {stable_path} size={stable_path.stat().st_size}")
+  mesh_dir = case_root / "meshes" / "task008"
+  meshes = generate_meshes(
+    output_path,
+    {1: "hepatic_vessels", 2: "liver_tumors"},
+    mesh_dir,
+    logger=case_logger,
+  )
+  if not meshes:
+    raise HTTPException(
+      status_code=500,
+      detail={"error": "Task008 produced no meshes", "case_id": case_id, "request_id": request_id},
+    )
+
+  metadata = {
+    "case_id": case_id,
+    "request_id": request_id,
+    "folds": folds,
+    "timestamp": time.time(),
+    "meshes": sorted(meshes.keys()),
+    "task008_seconds": round(timer.duration, 2),
+  }
+
+  pkg_dir = prepare_package(case_root, meshes=meshes, metadata=metadata)
+  archive_path = package_outputs(pkg_dir, base_name=case_id)
+  stable_path = stage_artifact(archive_path, SEND_ROOT, f"{case_id}_task008.zip")
+  case_logger(f"packaged task008 meshes -> {stable_path}")
   return FileResponse(
     stable_path,
-    media_type="application/gzip",
+    media_type="application/zip",
     filename=stable_path.name,
     headers={"X-Request-ID": request_id, "X-Case-ID": case_id},
   )
@@ -211,11 +236,34 @@ async def segment_liver(ct: UploadFile = File(...), fast: bool = False):
       detail={"error": f"TotalSegmentator liver failed: {exc}", "case_id": case_id, "request_id": request_id},
     ) from exc
 
-  stable_path = stage_artifact(output_path, SEND_ROOT, f"{case_id}_liver.nii.gz")
-  case_logger(f"copied output to {stable_path} size={stable_path.stat().st_size}")
+  mesh_dir = case_root / "meshes" / "liver"
+  meshes = generate_meshes(
+    output_path,
+    {1: "liver"},
+    mesh_dir,
+    logger=case_logger,
+  )
+  if not meshes:
+    raise HTTPException(
+      status_code=500,
+      detail={"error": "Liver mesh generation failed", "case_id": case_id, "request_id": request_id},
+    )
+
+  metadata = {
+    "case_id": case_id,
+    "request_id": request_id,
+    "fast": fast,
+    "timestamp": time.time(),
+    "meshes": sorted(meshes.keys()),
+    "liver_seconds": round(timer.duration, 2),
+  }
+  pkg_dir = prepare_package(case_root, meshes=meshes, metadata=metadata)
+  archive_path = package_outputs(pkg_dir, base_name=case_id)
+  stable_path = stage_artifact(archive_path, SEND_ROOT, f"{case_id}_liver.zip")
+  case_logger(f"packaged liver meshes -> {stable_path}")
   return FileResponse(
     stable_path,
-    media_type="application/gzip",
+    media_type="application/zip",
     filename=stable_path.name,
     headers={"X-Request-ID": request_id, "X-Case-ID": case_id},
   )
@@ -260,11 +308,34 @@ async def segment_totalseg(ct: UploadFile = File(...), fast: bool = False):
       detail={"error": f"TotalSegmentator multi-label failed: {exc}", "case_id": case_id, "request_id": request_id},
     ) from exc
 
-  stable_path = stage_artifact(output_path, SEND_ROOT, f"{case_id}_totalseg.nii.gz")
-  case_logger(f"copied output to {stable_path} size={stable_path.stat().st_size}")
+  mesh_dir = case_root / "meshes" / "totalseg"
+  meshes = generate_meshes(
+    output_path,
+    None,
+    mesh_dir,
+    logger=case_logger,
+  )
+  if not meshes:
+    raise HTTPException(
+      status_code=500,
+      detail={"error": "TotalSegmentator produced no meshes", "case_id": case_id, "request_id": request_id},
+    )
+
+  metadata = {
+    "case_id": case_id,
+    "request_id": request_id,
+    "fast": fast,
+    "timestamp": time.time(),
+    "meshes": sorted(meshes.keys()),
+    "totalseg_seconds": round(timer.duration, 2),
+  }
+  pkg_dir = prepare_package(case_root, meshes=meshes, metadata=metadata)
+  archive_path = package_outputs(pkg_dir, base_name=case_id)
+  stable_path = stage_artifact(archive_path, SEND_ROOT, f"{case_id}_totalseg.zip")
+  case_logger(f"packaged totalseg meshes -> {stable_path}")
   return FileResponse(
     stable_path,
-    media_type="application/gzip",
+    media_type="application/zip",
     filename=stable_path.name,
     headers={"X-Request-ID": request_id, "X-Case-ID": case_id},
   )
@@ -342,10 +413,31 @@ async def segment_both(
     "liver_seconds": round(timer_liver.duration, 2),
     "task008_seconds": round(timer_task008.duration, 2),
     "timestamp": time.time(),
+    "request_id": request_id,
   }
   case_logger(f"metadata {metadata}")
 
-  pkg_dir = prepare_package(out_dir, liver_mask=liver_path, task008_mask=task008_path, metadata=metadata)
+  liver_meshes = generate_meshes(
+    liver_path,
+    {1: "liver"},
+    case_root / "meshes" / "liver",
+    logger=case_logger,
+  )
+  task_meshes = generate_meshes(
+    task008_path,
+    {1: "hepatic_vessels", 2: "liver_tumors"},
+    case_root / "meshes" / "task008",
+    logger=case_logger,
+  )
+  meshes = {**liver_meshes, **task_meshes}
+  if not meshes:
+    raise HTTPException(
+      status_code=500,
+      detail={"error": "Mesh generation failed", "case_id": case_id, "request_id": request_id},
+    )
+  metadata["meshes"] = sorted(meshes.keys())
+
+  pkg_dir = prepare_package(case_root, meshes=meshes, metadata=metadata)
   archive_path = package_outputs(pkg_dir, base_name=case_id)
   stable_archive = stage_artifact(archive_path, SEND_ROOT, f"{case_id}_results.zip")
   case_logger(f"copied archive to {stable_archive} size={stable_archive.stat().st_size}")
@@ -462,10 +554,37 @@ async def segment_batch(
         "liver_seconds": round(timer_liver.duration, 2),
         "task008_seconds": round(timer_task008.duration, 2),
         "timestamp": time.time(),
+        "request_id": request_id,
       }
       case_logger(f"metadata {metadata}")
 
-      pkg_dir = prepare_package(out_dir, liver_mask=liver_path, task008_mask=task008_path, metadata=metadata)
+      liver_meshes = generate_meshes(
+        liver_path,
+        {1: "liver"},
+        out_dir / "meshes" / "liver",
+        logger=case_logger,
+      )
+      task_meshes = generate_meshes(
+        task008_path,
+        {1: "hepatic_vessels", 2: "liver_tumors"},
+        out_dir / "meshes" / "task008",
+        logger=case_logger,
+      )
+      meshes = {**liver_meshes, **task_meshes}
+      if not meshes:
+        case_logger("mesh generation failed")
+        raise HTTPException(
+          status_code=500,
+          detail={
+            "error": f"Batch case {case_id} produced no meshes",
+            "batch_id": batch_id,
+            "case_id": case_id,
+            "request_id": request_id,
+          },
+        )
+      metadata["meshes"] = sorted(meshes.keys())
+
+      pkg_dir = prepare_package(out_dir, meshes=meshes, metadata=metadata)
       dest_dir = batch_root / case_id
       if dest_dir.exists():
         shutil.rmtree(dest_dir)

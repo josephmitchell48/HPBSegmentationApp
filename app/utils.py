@@ -11,6 +11,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Iterator, Optional
 
+import numpy as np
+import SimpleITK as sitk
+from skimage import measure
+
 from fastapi import UploadFile
 
 from .config import get_settings
@@ -171,3 +175,88 @@ class Timer:
 
 def log_execution(label: str, seconds: float) -> None:
   print(f"[{label}] {seconds:.2f}s", flush=True)
+
+
+def _write_vtp(vertices: np.ndarray, faces: np.ndarray, destination: Path) -> Path:
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  offsets = np.arange(3, 3 * len(faces) + 1, 3, dtype=np.int32)
+  connectivity = faces.reshape(-1)
+  verts_flat = vertices.reshape(-1)
+
+  with destination.open("w") as fh:
+    fh.write('<?xml version="1.0"?>\n')
+    fh.write('<VTKFile type="PolyData" version="0.1" byte_order="LittleEndian">\n')
+    fh.write("  <PolyData>\n")
+    fh.write(f'    <Piece NumberOfPoints="{len(vertices)}" NumberOfPolys="{len(faces)}">\n')
+    fh.write("      <Points>\n")
+    fh.write('        <DataArray type="Float32" NumberOfComponents="3" format="ascii">\n')
+    fh.write("          " + " ".join(f"{v:.5f}" for v in verts_flat) + "\n")
+    fh.write("        </DataArray>\n")
+    fh.write("      </Points>\n")
+    fh.write("      <Polys>\n")
+    fh.write('        <DataArray type="Int32" Name="connectivity" format="ascii">\n')
+    fh.write("          " + " ".join(str(int(v)) for v in connectivity) + "\n")
+    fh.write("        </DataArray>\n")
+    fh.write('        <DataArray type="Int32" Name="offsets" format="ascii">\n')
+    fh.write("          " + " ".join(str(int(v)) for v in offsets) + "\n")
+    fh.write("        </DataArray>\n")
+    fh.write("      </Polys>\n")
+    fh.write("    </Piece>\n")
+    fh.write("  </PolyData>\n")
+    fh.write("</VTKFile>\n")
+
+  return destination
+
+
+def generate_meshes(
+  mask_path: Path,
+  label_map: Optional[Dict[int, str]],
+  output_dir: Path,
+  logger: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Path]:
+  """
+  Convert labeled mask into VTP meshes for the provided labels.
+  label_map maps label value -> descriptive name.
+  """
+  image = sitk.ReadImage(str(mask_path))
+  array = sitk.GetArrayFromImage(image)  # z, y, x
+  spacing = np.array(image.GetSpacing(), dtype=np.float32)  # (x, y, z)
+  origin = np.array(image.GetOrigin(), dtype=np.float32)
+  direction = np.array(image.GetDirection(), dtype=np.float32).reshape(3, 3)
+
+  unique_labels = [int(v) for v in np.unique(array) if int(v) > 0]
+  if not unique_labels:
+    if logger:
+      logger("no non-zero labels found; skipping mesh generation")
+    return {}
+
+  effective_map: Dict[int, str]
+  if label_map:
+    effective_map = {int(label): name for label, name in label_map.items() if int(label) in unique_labels}
+  else:
+    effective_map = {label: f"label_{label}" for label in unique_labels}
+
+  meshes: Dict[str, Path] = {}
+  for label_value in unique_labels:
+    if label_value not in effective_map:
+      continue
+    label_name = effective_map[label_value]
+    binary = array == int(label_value)
+    if not np.any(binary):
+      if logger:
+        logger(f"label {label_name} (value={label_value}) empty; skipping")
+      continue
+
+    verts, faces, _, _ = measure.marching_cubes(binary.astype(np.uint8), level=0.5)
+    ijk = np.stack([verts[:, 2], verts[:, 1], verts[:, 0]], axis=1)
+    scaled = ijk * spacing
+    physical = (direction @ scaled.T).T + origin
+    vtp_path = output_dir / f"{label_name}.vtp"
+    _write_vtp(physical.astype(np.float32), faces.astype(np.int32), vtp_path)
+    meshes[label_name] = vtp_path
+    if logger:
+      logger(
+        f"label {label_name} mesh points={len(physical)} faces={len(faces)} path={vtp_path}"
+      )
+
+  return meshes

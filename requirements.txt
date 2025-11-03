@@ -6,6 +6,7 @@ python-dotenv==1.0.1
 boto3==1.35.32
 numpy==1.26.4
 SimpleITK==2.3.1
+scikit-image==0.25.2
 # Runtime segmentation frameworks (install in AMI or custom image)
-TotalSegmentator==2.2.0
+TotalSegmentator==2.2.1
 nnunet==1.7.0
