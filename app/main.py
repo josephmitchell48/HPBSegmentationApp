@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import List
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from .config import get_settings
@@ -22,6 +22,11 @@ from .utils import (
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
+ARTIFACT_ROOT = Path("/opt/hpb-seg/artifacts")
+WORK_ROOT = ARTIFACT_ROOT / "work"
+SEND_ROOT = ARTIFACT_ROOT / "send"
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
+SEND_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 @app.get("/healthz")
@@ -57,105 +62,123 @@ def version() -> JSONResponse:
 @app.post("/segment/task008")
 async def segment_task008(ct: UploadFile = File(...), folds: str = "0"):
   case_id = unique_case_id()
-  with temp_case_dirs(case_id) as dirs:
-    in_dir, out_dir = dirs["in"], dirs["out"]
-    in_path = in_dir / f"{case_id}_0000.nii.gz"
-    in_path.write_bytes(await ct.read())
+  case_root = WORK_ROOT / case_id
+  in_dir = case_root / "in"
+  out_dir = case_root / "out"
+  in_dir.mkdir(parents=True, exist_ok=True)
+  out_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-      with Timer() as timer:
-        output_path = nnunet_v1_task008(in_dir, out_dir, case_id=case_id, folds=folds)
-      log_execution(f"task008:{case_id}", timer.duration)
-    except Exception as exc:
-      raise HTTPException(status_code=500, detail=f"Task008 failed: {exc}") from exc
+  in_path = in_dir / f"{case_id}_0000.nii.gz"
+  in_path.write_bytes(await ct.read())
 
-    return FileResponse(output_path, media_type="application/gzip", filename=f"{case_id}_task008.nii.gz")
+  try:
+    with Timer() as timer:
+      output_path = nnunet_v1_task008(in_dir, out_dir, case_id=case_id, folds=folds)
+    log_execution(f"task008:{case_id}", timer.duration)
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"Task008 failed: {exc}") from exc
+
+  stable_path = SEND_ROOT / f"{case_id}_task008.nii.gz"
+  shutil.copy2(output_path, stable_path)
+  return FileResponse(stable_path, media_type="application/gzip", filename=stable_path.name)
 
 
 @app.post("/segment/liver")
 async def segment_liver(ct: UploadFile = File(...), fast: bool = False):
   case_id = unique_case_id()
-  with temp_case_dirs(case_id) as dirs:
-    in_dir, out_dir = dirs["in"], dirs["out"]
-    in_path = in_dir / f"{case_id}.nii.gz"
-    in_path.write_bytes(await ct.read())
+  case_root = WORK_ROOT / case_id
+  in_dir = case_root / "in"
+  out_dir = case_root / "out"
+  in_dir.mkdir(parents=True, exist_ok=True)
+  out_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-      with Timer() as timer:
-        output_path = totalseg_liver_only(in_path, out_dir, fast=fast)
-      log_execution(f"liver:{case_id}", timer.duration)
-    except Exception as exc:
-      raise HTTPException(status_code=500, detail=f"TotalSegmentator liver failed: {exc}") from exc
+  in_path = in_dir / f"{case_id}.nii.gz"
+  in_path.write_bytes(await ct.read())
 
-    return FileResponse(output_path, media_type="application/gzip", filename=f"{case_id}_liver.nii.gz")
+  try:
+    with Timer() as timer:
+      output_path = totalseg_liver_only(in_path, out_dir, fast=fast)
+    log_execution(f"liver:{case_id}", timer.duration)
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"TotalSegmentator liver failed: {exc}") from exc
+
+  stable_path = SEND_ROOT / f"{case_id}_liver.nii.gz"
+  shutil.copy2(output_path, stable_path)
+  return FileResponse(stable_path, media_type="application/gzip", filename=stable_path.name)
 
 
 @app.post("/segment/totalseg")
 async def segment_totalseg(ct: UploadFile = File(...), fast: bool = False):
   case_id = unique_case_id()
-  with temp_case_dirs(case_id) as dirs:
-    in_dir, out_dir = dirs["in"], dirs["out"]
-    in_path = in_dir / f"{case_id}.nii.gz"
-    in_path.write_bytes(await ct.read())
+  case_root = WORK_ROOT / case_id
+  in_dir = case_root / "in"
+  out_dir = case_root / "out"
+  in_dir.mkdir(parents=True, exist_ok=True)
+  out_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-      with Timer() as timer:
-        output_path = totalseg_multilabel(in_path, out_dir, fast=fast)
-      log_execution(f"totalseg:{case_id}", timer.duration)
-    except Exception as exc:
-      raise HTTPException(status_code=500, detail=f"TotalSegmentator multi-label failed: {exc}") from exc
+  in_path = in_dir / f"{case_id}.nii.gz"
+  in_path.write_bytes(await ct.read())
 
-    return FileResponse(output_path, media_type="application/gzip", filename=f"{case_id}_totalseg.nii.gz")
+  try:
+    with Timer() as timer:
+      output_path = totalseg_multilabel(in_path, out_dir, fast=fast)
+    log_execution(f"totalseg:{case_id}", timer.duration)
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"TotalSegmentator multi-label failed: {exc}") from exc
+
+  stable_path = SEND_ROOT / f"{case_id}_totalseg.nii.gz"
+  shutil.copy2(output_path, stable_path)
+  return FileResponse(stable_path, media_type="application/gzip", filename=stable_path.name)
 
 
 @app.post("/segment/both")
 async def segment_both(
-  background_tasks: BackgroundTasks,
   ct: UploadFile = File(...),
   folds: str = "0",
   fast: bool = True,
 ):
   case_id = unique_case_id()
-  with temp_case_dirs(case_id) as dirs:
-    in_dir, out_dir = dirs["in"], dirs["out"]
-    case_root = out_dir
+  case_root = WORK_ROOT / case_id
+  in_dir = case_root / "in"
+  out_dir = case_root / "out"
+  in_dir.mkdir(parents=True, exist_ok=True)
+  out_dir.mkdir(parents=True, exist_ok=True)
 
-    raw_ct = in_dir / f"{case_id}.nii.gz"
-    ct_v1 = in_dir / f"{case_id}_0000.nii.gz"
-    data = await ct.read()
-    raw_ct.write_bytes(data)
-    ct_v1.write_bytes(data)
+  raw_ct = in_dir / f"{case_id}.nii.gz"
+  ct_v1 = in_dir / f"{case_id}_0000.nii.gz"
+  data = await ct.read()
+  raw_ct.write_bytes(data)
+  ct_v1.write_bytes(data)
 
-    liver_dir = case_root / "totalseg"
-    task_dir = case_root / "task008"
-    liver_dir.mkdir(parents=True, exist_ok=True)
-    task_dir.mkdir(parents=True, exist_ok=True)
+  liver_dir = out_dir / "totalseg"
+  task_dir = out_dir / "task008"
+  liver_dir.mkdir(parents=True, exist_ok=True)
+  task_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-      with Timer() as timer_liver:
-        liver_path = totalseg_liver_only(raw_ct, liver_dir, fast=fast)
-      log_execution(f"liver:{case_id}", timer_liver.duration)
+  try:
+    with Timer() as timer_liver:
+      liver_path = totalseg_liver_only(raw_ct, liver_dir, fast=fast)
+    log_execution(f"liver:{case_id}", timer_liver.duration)
 
-      with Timer() as timer_task008:
-        task008_path = nnunet_v1_task008(in_dir, task_dir, case_id=case_id, folds=folds)
-      log_execution(f"task008:{case_id}", timer_task008.duration)
-    except Exception as exc:
-      raise HTTPException(status_code=500, detail=f"Pipeline failed: {exc}") from exc
+    with Timer() as timer_task008:
+      task008_path = nnunet_v1_task008(in_dir, task_dir, case_id=case_id, folds=folds)
+    log_execution(f"task008:{case_id}", timer_task008.duration)
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"Pipeline failed: {exc}") from exc
 
-    metadata = {
-      "case_id": case_id,
-      "labels_task008": {"1": "hepatic_vessels", "2": "liver_tumors"},
-      "liver_seconds": round(timer_liver.duration, 2),
-      "task008_seconds": round(timer_task008.duration, 2),
-      "timestamp": time.time(),
-    }
+  metadata = {
+    "case_id": case_id,
+    "labels_task008": {"1": "hepatic_vessels", "2": "liver_tumors"},
+    "liver_seconds": round(timer_liver.duration, 2),
+    "task008_seconds": round(timer_task008.duration, 2),
+    "timestamp": time.time(),
+  }
 
-    pkg_dir = prepare_package(case_root, liver_mask=liver_path, task008_mask=task008_path, metadata=metadata)
-    archive_path = package_outputs(pkg_dir, base_name=case_id)
-
-    background_tasks.add_task(shutil.rmtree, pkg_dir.parent, ignore_errors=True)
-
-    return FileResponse(archive_path, media_type="application/zip", filename=f"{case_id}_results.zip")
+  pkg_dir = prepare_package(out_dir, liver_mask=liver_path, task008_mask=task008_path, metadata=metadata)
+  archive_path = package_outputs(pkg_dir, base_name=case_id)
+  stable_archive = SEND_ROOT / f"{case_id}_results.zip"
+  shutil.copy2(archive_path, stable_archive)
+  return FileResponse(stable_archive, media_type="application/zip", filename=stable_archive.name)
 
 
 @app.post("/segment/batch")

@@ -55,16 +55,17 @@ def uuid4_hex(length: int = 8) -> str:
 
 
 @contextmanager
-def temp_case_dirs(case_id: str) -> Iterator[Dict[str, Path]]:
+def temp_case_dirs(case_id: str, *, cleanup: bool = True) -> Iterator[Dict[str, Path]]:
   settings = get_settings()
   in_dir = settings.in_root / case_id
   out_dir = settings.out_root / case_id
   in_dir.mkdir(parents=True, exist_ok=True)
   out_dir.mkdir(parents=True, exist_ok=True)
+  dirs: Dict[str, Path] = {"in": in_dir, "out": out_dir, "root": out_dir}
   try:
-    yield {"in": in_dir, "out": out_dir}
+    yield dirs
   finally:
-    if not settings.keep_intermediate:
+    if cleanup and not settings.keep_intermediate:
       shutil.rmtree(in_dir, ignore_errors=True)
       shutil.rmtree(out_dir, ignore_errors=True)
 
