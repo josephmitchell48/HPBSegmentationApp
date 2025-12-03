@@ -1,0 +1,67 @@
+### AWS ###
+
+# Boot Up #
+
+ssh -i ./security/3dhpb-key.pem ubuntu@
+source /opt/hpb-venv/bin/activate
+export RESULTS_FOLDER=/models/results_v1
+uvicorn app.main:app --host 0.0.0.0 --port 8080
+
+sudo shutdown -h now
+
+### Transfer Files ###
+
+# Local <-> AWS #
+scp -i ./security/3dhpb-key.pem <localfile> ubuntu@<EC2_IP>:<remote_path>
+
+# AWS <-> Local #
+scp -i ./security/3dhpb-key.pem ubuntu@<EC2_IP>:<remote_file> .
+
+### HPBSegmentator EC2 Checks ###
+
+# Health Check #
+curl http://35.153.140.193:8080/healthz
+
+# Version Check #
+curl http://35.153.140.193:8080/version
+
+# Readiness Check #
+curl -f http://35.153.140.193:8080/readinessz  | jq
+
+### HPBSegmentator EC2 Segmentation Commands ###
+
+# TotalSegmentator Liver (raw NIfTI default) #
+
+curl -X POST "http://35.153.140.193:8080/segment/liver" \
+  -F "ct=@./tryingNewLivers/inputData/hepaticvessel_001.nii.gz" \
+  -OJ  # use -o <path> if you want to choose the filename locally
+
+# TotalSegmentator Liver (viewer bundle ZIP) #
+curl -X POST "http://35.153.140.193:8080/segment/liver?web=1" \
+  -F "ct=@./tryingNewLivers/inputData/hepaticvessel_001.nii.gz" \
+  -o hepaticvessel_001_liver.zip
+
+# Task008 #
+
+curl -X POST "http://35.153.140.193:8080/segment/task008?folds=0" \
+  -F "ct=@./tryingNewLivers/inputData/hepaticvessel_001.nii.gz" \
+  -OJ
+
+# Task008 viewer bundle #
+curl -X POST "http://35.153.140.193:8080/segment/task008?folds=0&web=1" \
+  -F "ct=@./tryingNewLivers/inputData/hepaticvessel_001.nii.gz" \
+  -o hepaticvessel_001_task008.zip
+
+# AWS Both Models run
+
+curl -X POST "http://98.83.160.47:8080/segment/both?folds=0&fast=true" \
+  -F "ct=@$(pwd)/liver.nii.gz" \
+  -o case_results.zip  # contains raw liver/task008 NIfTIs + metadata
+
+curl -X POST "http://52.90.241.23:8080/segment/both?fast=true&folds=0&web=1" \
+     -F "ct=@hepaticvessel_001.nii.gz" \
+     -o case_results_viewer.zip  # VTP/VTI viewer bundle
+
+### Export For Web Viewer ###
+
+python -m hpbviz.pipeline --input-root data/awsOutput --output-root data/webOutput

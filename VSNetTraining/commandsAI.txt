@@ -1,0 +1,90 @@
+### AI TRAINING COMMANDS (to be run on hpb_infer_gpu) ### 
+
+# Boot Up #
+
+ssh -i ./security/3dhpb-key.pem ubuntu@
+
+Looking for why i have this, did not work on hpbSegmentator machine - source ~/.hpb/bin/activate
+
+source /opt/hpb-venv/bin/activate
+
+# Transfer Files #
+
+# Local <-> AWS #
+scp -i ./security/3dhpb-key.pem <localfile> ubuntu@<EC2_IP>:<remote_path>
+
+# AWS <-> Local #
+scp -i ./security/3dhpb-key.pem ubuntu@<EC2_IP>:<remote_file> .
+
+nohup bash -lc '
+  source ~/.venvs/vsnet/bin/activate
+  export PYTHONPATH="$PYTHONPATH:$HOME/repos/VSNet"
+  export PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync,expandable_segments:True,max_split_size_mb:64,garbage_collection_threshold:0.9
+  export CUBLAS_WORKSPACE_CONFIG=:4096:8
+  cd ~
+  python -u train_vsnet.py \
+    --data_root /data/Task08_HepaticVessel \
+    --out       ~/models/vsnet_ckpts_fast \
+    --epochs    200 \
+    --workers   4 \
+    --roi       96 96 96 \
+    --pixdim    1.5 1.5 1.5 \
+    --patches_per_vol 2 \
+    --accum       8 \
+    --sw_batch    1 \
+    --val_every   2 \
+    --fp16 \
+    --channels_last \
+    --cache_dir   /mnt/nvme/monai_cache
+' > ~/models/vsnet_ckpts_fast/train.log 2>&1 & echo $! > ~/models/vsnet_ckpts_fast/train.pid
+
+
+
+nohup bash -lc '
+  source ~/.venvs/vsnet/bin/activate
+  export PYTHONPATH="$PYTHONPATH:$HOME/repos/VSNet"
+  export PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync,expandable_segments:True
+  mkdir -p /mnt/nvme/monai_cache ~/models/vsnet_ckpts_multitask
+  python -u ~/train_vsnet_multitask.py \
+    --data_root /data/Task08_HepaticVessel \
+    --out       ~/models/vsnet_ckpts_multitask \
+    --epochs    200 \
+    --workers   4 \
+    --roi       96 96 96 \
+    --pixdim    1.5 1.5 1.5 \
+    --patches_per_vol 4 \
+    --accum     8 \
+    --sw_batch  1 \
+    --val_every 2 \
+    --fp16 \
+    --channels_last \
+    --cache_dir /mnt/nvme/monai_cache \
+    --deep_w2 0.3 --deep_w3 0.1 --edge_w 0.1 --center_w 0.0
+' > ~/models/vsnet_ckpts_multitask/train.log 2>&1 & echo $! > ~/models/vsnet_ckpts_multitask/train.pid
+
+
+
+nohup bash -lc '
+  source ~/.venvs/vsnet/bin/activate
+  export PYTHONPATH="$PYTHONPATH:$HOME/repos/VSNet"
+  mkdir -p /mnt/nvme/monai_cache ~/models/vsnet_ckpts_multitask
+  python -u ~/train_vsnet_multitask_patched5.py \
+    --data_root /data/Task08_HepaticVessel \
+    --out       ~/models/vsnet_ckpts_multitask \
+    --epochs    200 \
+    --workers   4 \
+    --roi       96 96 96 \
+    --pixdim    1.5 1.5 1.5 \
+    --patches_per_vol 4 \
+    --accum     8 \
+    --sw_batch  1 \
+    --val_every 2 \
+    --channels_last \
+    --cache_dir /mnt/nvme/monai_cache \
+    --in_channels 1 --out_channels 3 \
+    --center_w 0.2 --edge_w 0.2 --deep_w2 0.05 --deep_w3 0.05
+' > ~/models/vsnet_ckpts_multitask/train.log 2>&1 \
+  & echo $! > ~/models/vsnet_ckpts_multitask/train.pid
+
+
+

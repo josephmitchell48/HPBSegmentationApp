@@ -7,7 +7,7 @@ FastAPI microservice for hepatopancreatobiliary (HPB) imaging segmentation. The 
 - `POST /segment/task008` – nnU-Net v1 Task008 hepatic vessel + tumor model
 - `POST /segment/liver` – TotalSegmentator liver-only ROI
 - `POST /segment/totalseg` – TotalSegmentator multi-label (optional)
-- `POST /segment/both` – Runs both pipelines and returns a packaged ZIP (liver + task008 + metadata)
+- `POST /segment/both` – Runs both pipelines; see Output Formats below for response shape
 - `POST /segment/batch` – Accepts a tar/zip archive with multiple NIfTI cases and processes them sequentially
 - Health/version endpoints for ops visibility
 - Disk cleanup hooks and throttled threading env vars for deterministic EC2 performance
@@ -50,8 +50,16 @@ Upload a CT NIfTI file:
 ```bash
 curl -X POST \
   -F "ct=@/path/to/case_0000.nii.gz" \
-  http://localhost:8080/segment/both --output results.zip
+  "http://localhost:8080/segment/liver" -OJ   # saves raw NIfTI mask as returned by the server
 ```
+
+## Output Formats
+
+- By default, `/segment/liver` and `/segment/task008` return the raw label NIfTI (`application/gzip`) named from the uploaded file (e.g., upload `case_0000.nii.gz` → `case_0000_liver.nii.gz`). Use `curl -OJ` to keep the server-provided filename or `-o` to pick your own path.
+- Add `?web=1` to receive the viewer bundle (ZIP with VTP meshes + VTI volume + manifest). The ZIP is named from the upload base (e.g., `case_0000_task008.zip`).
+- `/segment/both`:
+  - default (`web=0`/omitted): returns a ZIP containing the raw liver and Task008 NIfTIs plus metadata (named `<upload>_both.zip`).
+  - `?web=1`: returns the mesh/VTI viewer bundle ZIP (also named from the upload base).
 
 ## EC2 Deployment Notes
 
