@@ -54,9 +54,9 @@ curl -X POST "http://35.153.140.193:8080/segment/task008?folds=0&web=1" \
 
 # AWS Both Models run
 
-curl -X POST "http://98.83.160.47:8080/segment/both?folds=0&fast=true" \
-  -F "ct=@$(pwd)/liver.nii.gz" \
-  -o case_results.zip  # contains raw liver/task008 NIfTIs + metadata
+curl -X POST "http://35.153.140.193:8080/segment/both?folds=0&fast=true" \
+  -F "ct=@$(pwd)/tryingNewLivers/inputData/hepaticvessel_004.nii.gz" \
+  -o hepaticvessel_004.zip  # contains raw liver/task008 NIfTIs + metadata
 
 curl -X POST "http://52.90.241.23:8080/segment/both?fast=true&folds=0&web=1" \
      -F "ct=@hepaticvessel_001.nii.gz" \
